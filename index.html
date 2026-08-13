@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Twitch → Speechify</title>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 30px;
+      background: #0e0e10;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: auto;
+    }
+
+    h1 {
+      margin-bottom: 25px;
+    }
+
+    .status {
+      background: #18181b;
+      padding: 15px;
+      border-radius: 10px;
+      margin-bottom: 15px;
+    }
+
+    .online {
+      color: #00ff88;
+    }
+
+    .offline {
+      color: #ff4444;
+    }
+
+    button {
+      background: #9147ff;
+      color: white;
+      border: none;
+      padding: 12px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+
+    button:hover {
+      background: #772ce8;
+    }
+
+    button:disabled {
+      opacity: 0.7;
+      cursor: default;
+    }
+
+    #clearButton {
+      background: #444;
+    }
+
+    #log {
+      margin-top: 25px;
+      background: #050505;
+      border-radius: 10px;
+      padding: 15px;
+      height: 350px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+
+    .message {
+      margin-bottom: 8px;
+    }
+
+    .speaking {
+      color: #00ff88;
+    }
+
+    .error {
+      color: #ff5555;
+    }
+
+    #enableAudioButton {
+      background: #00a86b;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <h1>🔊 Twitch → Speechify</h1>
+
+  <div class="status">
+    Twitch:
+    <strong id="twitchStatus">Connecting...</strong>
+  </div>
+
+  <div class="status">
+    TTS:
+    <strong id="ttsStatus">ON</strong>
+  </div>
+
+  <div class="status">
+    Queue:
+    <strong id="queueLength">0</strong>
+  </div>
+
+  <button id="enableAudioButton">
+    🔊 Enable TTS Audio
+  </button>
+
+  <button id="toggleButton">
+    Turn TTS Off
+  </button>
+
+  <button id="clearButton">
+    Clear Queue
+  </button>
+
+  <div id="log"></div>
+
+</div>
+
+<script>
+
+const socket = new WebSocket(
+  `ws://${location.host}`
+);
+
+const twitchStatus =
+  document.getElementById("twitchStatus");
+
+const ttsStatus =
+  document.getElementById("ttsStatus");
+
+const queueLength =
+  document.getElementById("queueLength");
+
+const enableAudioButton =
+  document.getElementById("enableAudioButton");
+
+const toggleButton =
+  document.getElementById("toggleButton");
+
+const clearButton =
+  document.getElementById("clearButton");
+
+const log =
+  document.getElementById("log");
+
+let enabled = true;
+let audioUnlocked = false;
+
+const audioQueue = [];
+let isPlaying = false;
+
+
+// -----------------------------
+// Logging
+// -----------------------------
+
+function logMessage(message, className = "") {
+
+  const element =
+    document.createElement("div");
+
+  element.className =
+    `message ${className}`;
+
+  element.textContent =
+    message;
+
+  log.appendChild(element);
+
+  log.scrollTop =
+    log.scrollHeight;
+}
+
+
+// -----------------------------
+// UI
+// -----------------------------
+
+function updateUI() {
+
+  ttsStatus.textContent =
+    enabled ? "ON" : "OFF";
+
+  toggleButton.textContent =
+    enabled
+      ? "Turn TTS Off"
+      : "Turn TTS On";
+}
+
+
+// -----------------------------
+// Enable browser audio
+// -----------------------------
+
+enableAudioButton.addEventListener(
+  "click",
+  () => {
+
+    audioUnlocked = true;
+
+    enableAudioButton.textContent =
+      "✅ Audio Enabled";
+
+    enableAudioButton.disabled =
+      true;
+
+    logMessage(
+      "Audio enabled. Twitch TTS is ready."
+    );
+
+    processAudioQueue();
+  }
+);
+
+
+// -----------------------------
+// Add audio to queue
+// -----------------------------
+
+function playAudio(base64Audio) {
+
+  audioQueue.push(base64Audio);
+
+  logMessage(
+    `🎵 Audio received (${base64Audio.length} characters)`
+  );
+
+  processAudioQueue();
+}
+
+
+// -----------------------------
+// Play Speechify MP3
+// -----------------------------
+
+async function processAudioQueue() {
+
+  if (!audioUnlocked) {
+    return;
+  }
+
+  if (isPlaying) {
+    return;
+  }
+
+  if (audioQueue.length === 0) {
+    return;
+  }
+
+  isPlaying = true;
+
+  const base64Audio =
+    audioQueue.shift();
+
+  let audio = null;
+
+  try {
+
+    logMessage(
+      "▶️ Playing TTS audio..."
+    );
+
+    audio = new Audio(
+      `data:audio/mpeg;base64,${base64Audio}`
+    );
+
+    audio.volume = 1.0;
+
+    await audio.play();
+
+    await new Promise(
+      (resolve, reject) => {
+
+        audio.onended =
+          resolve;
+
+        audio.onerror =
+          () => reject(
+            new Error(
+              "Safari could not play the Speechify MP3."
+            )
+          );
+      }
+    );
+
+    logMessage(
+      "✅ TTS audio finished.",
+      "speaking"
+    );
+
+  } catch (error) {
+
+    logMessage(
+      "❌ Audio playback failed: " +
+      error.message,
+      "error"
+    );
+
+    console.error(
+      "TTS audio playback error:",
+      error
+    );
+
+  } finally {
+
+    isPlaying = false;
+
+    processAudioQueue();
+  }
+}
+
+
+// -----------------------------
+// WebSocket connection
+// -----------------------------
+
+socket.addEventListener(
+  "open",
+  () => {
+
+    logMessage(
+      "Connected to local TTS server."
+    );
+  }
+);
+
+
+// -----------------------------
+// WebSocket messages
+// -----------------------------
+
+socket.addEventListener(
+  "message",
+  event => {
+
+    try {
+
+      const data =
+        JSON.parse(event.data);
+
+
+      // Initial state
+
+      if (data.type === "state") {
+
+        enabled =
+          data.enabled;
+
+        queueLength.textContent =
+          data.queueLength;
+
+        updateUI();
+
+        return;
+      }
+
+
+      // Twitch connection
+
+      if (data.type === "twitch") {
+
+        if (data.connected) {
+
+          twitchStatus.textContent =
+            `Connected to #${data.channel}`;
+
+          twitchStatus.className =
+            "online";
+
+        } else {
+
+          twitchStatus.textContent =
+            "Disconnected";
+
+          twitchStatus.className =
+            "offline";
+        }
+
+        return;
+      }
+
+
+      // TTS enabled / disabled
+
+      if (data.type === "enabled") {
+
+        enabled =
+          data.enabled;
+
+        updateUI();
+
+        logMessage(
+          enabled
+            ? "TTS enabled."
+            : "TTS disabled."
+        );
+
+        return;
+      }
+
+
+      // Message queued
+
+      if (data.type === "queued") {
+
+        queueLength.textContent =
+          data.queueLength;
+
+        logMessage(
+          `${data.username}: ${data.text}`
+        );
+
+        return;
+      }
+
+
+      // Speaking
+
+      if (data.type === "speaking") {
+
+        queueLength.textContent =
+          data.queueLength;
+
+        logMessage(
+          `🔊 ${data.username}: ${data.text}`,
+          "speaking"
+        );
+
+        return;
+      }
+
+
+      // Speechify audio
+
+      if (data.type === "audio") {
+
+        console.log(
+          "Received Speechify audio"
+        );
+
+        console.log(
+          "Audio type:",
+          typeof data.audio
+        );
+
+        console.log(
+          "Audio length:",
+          data.audio?.length
+        );
+
+        playAudio(
+          data.audio
+        );
+
+        return;
+      }
+
+
+      // Queue cleared
+
+      if (data.type === "queue") {
+
+        queueLength.textContent =
+          data.queueLength;
+
+        return;
+      }
+
+
+      // Error
+
+      if (data.type === "error") {
+
+        logMessage(
+          `ERROR: ${data.message}`,
+          "error"
+        );
+
+        return;
+      }
+
+    } catch (error) {
+
+      console.error(
+        "WebSocket message error:",
+        error
+      );
+
+      logMessage(
+        "Invalid message received from server.",
+        "error"
+      );
+    }
+  }
+);
+
+
+// -----------------------------
+// WebSocket errors
+// -----------------------------
+
+socket.addEventListener(
+  "error",
+  error => {
+
+    console.error(
+      "WebSocket error:",
+      error
+    );
+
+    logMessage(
+      "WebSocket connection error.",
+      "error"
+    );
+  }
+);
+
+
+// -----------------------------
+// Toggle TTS
+// -----------------------------
+
+toggleButton.addEventListener(
+  "click",
+  () => {
+
+    enabled =
+      !enabled;
+
+    socket.send(
+      JSON.stringify({
+        type: "toggle",
+        enabled
+      })
+    );
+  }
+);
+
+
+// -----------------------------
+// Clear queue
+// -----------------------------
+
+clearButton.addEventListener(
+  "click",
+  () => {
+
+    socket.send(
+      JSON.stringify({
+        type: "clear"
+      })
+    );
+  }
+);
+
+</script>
+
+</body>
+</html>
