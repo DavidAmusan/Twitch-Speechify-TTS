@@ -1,5 +1,5 @@
 # Twitch-Speechify-TTS-for-Godisincontroll
-Twitch chat Text to speech using Speechify Voice overs, You will need to make ur own.env file I will add a template shortly
+Twitch chat Text to speech using Speechify Voice overs, You will need to make ur own.env file I will add a template shortly. It actually does work so if it doesn't work for u, Pray to Jehovah then just upload it into copt and beg it to fix.
 # 🎙️ Twitch → Speechify TTS
 
 A lightweight Twitch chat text-to-speech system using:
